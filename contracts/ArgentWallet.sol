@@ -13,10 +13,10 @@ contract ArgentWallet is IArgentWallet {
     bytes4 public constant ESCAPE_SIGNER_SELECTOR = bytes4(keccak256("escapeSigner(address,bytes,uint256)"));
     bytes4 public constant ESCAPE_GUARDIAN_SELECTOR = bytes4(keccak256("escapeGuardian(address,bytes,uint256)"));
 
-    uint256 public nonce = 0;
+    uint256 public nonce;
     address public signer;
     address public guardian;
-    Escape public escape = Escape(0, address(0));
+    Escape public escape;
 
     constructor(address _signer, address _guardian) {
         signer = _signer;
@@ -106,7 +106,7 @@ contract ArgentWallet is IArgentWallet {
         bytes32 signedHash = getSignedHash(address(this), abi.encodePacked(CANCEL_ESCAPE_SELECTOR), _nonce);
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
 
-        escape = Escape(0, address(0));
+        delete escape;
     }
 
     function escapeSigner(address _newSigner, bytes calldata _guardianSignature, uint256 _nonce) external {
@@ -118,7 +118,7 @@ contract ArgentWallet is IArgentWallet {
         validateGuardianSignature(signedHash, _guardianSignature);
 
         signer = _newSigner;
-        escape = Escape(0, address(0));
+        delete escape;
     }
 
     function escapeGuardian(address _newGuardian, bytes calldata _signerSignature, uint256 _nonce) external {
@@ -130,7 +130,7 @@ contract ArgentWallet is IArgentWallet {
         validateSignerSignature(signedHash, _signerSignature);
 
         guardian = _newGuardian;
-        escape = Escape(0, address(0));
+        delete escape;
     }
 
     // public 
