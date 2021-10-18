@@ -8,7 +8,6 @@ import { ArgentWallet, Greeter } from "../typechain";
 
 interface ISignedMessage {
   to?: string;
-  selector: BytesLike;
   data: BytesLike;
   nonce?: BigNumberish;
 }
@@ -29,14 +28,14 @@ describe("ArgentWallet", () => {
     escapeGuardian: "",
   };
 
-  const getSignatures = async (signers: Wallet[], { to, selector, data, nonce }: ISignedMessage) => {
+  const getSignatures = async (signers: Wallet[], { to, data, nonce }: ISignedMessage) => {
     if (typeof to === "undefined") {
       to = wallet.address;
     }
     if (typeof nonce === "undefined") {
       nonce = await wallet.nonce();
     }
-    const messageHex = await wallet.getSignedMessage(to, selector, data, nonce);
+    const messageHex = await wallet.getSignedMessage(to, data, nonce);
     const messageBytes = ethers.utils.arrayify(messageHex);
     const signatures = signers.map((signer) => signer.signMessage(messageBytes))
     return Promise.all(signatures);
@@ -62,25 +61,23 @@ describe("ArgentWallet", () => {
     const greeter = await GreeterContract.deploy("Hello") as Greeter;
 
     const to = greeter.address;
-    const calldata = greeter.interface.encodeFunctionData("setGreeting", ["Hola"]);
-    const selector = calldata.slice(0, 10);
-    const data = `0x${calldata.slice(10)}`;
+    const data = greeter.interface.encodeFunctionData("setGreeting", ["Hola"]);
 
     const [signerSignature, guardianSignature, thirdPartySignature] = await getSignatures(
       [signer, guardian, thirdParty],
-      { to, selector, data }
+      { to, data }
     );
 
     // failures cases
-    await expect(wallet.execute(ethers.constants.AddressZero, calldata, signerSignature, guardianSignature, 0)).to.be.revertedWith("null _to");
-    await expect(wallet.execute(to, calldata, signerSignature, guardianSignature, 1)).to.be.revertedWith("invalid nonce");
-    await expect(wallet.execute(to, calldata, signerSignature, thirdPartySignature, 0)).to.be.revertedWith("invalid signature");
-    await expect(wallet.execute(to, calldata, thirdPartySignature, guardianSignature, 0)).to.be.revertedWith("invalid signature");
-    await expect(wallet.execute(to, calldata, "0x", "0x", 0)).to.be.revertedWith("invalid signature");
+    await expect(wallet.execute(ethers.constants.AddressZero, data, signerSignature, guardianSignature, 0)).to.be.revertedWith("null _to");
+    await expect(wallet.execute(to, data, signerSignature, guardianSignature, 1)).to.be.revertedWith("invalid nonce");
+    await expect(wallet.execute(to, data, signerSignature, thirdPartySignature, 0)).to.be.revertedWith("invalid signature");
+    await expect(wallet.execute(to, data, thirdPartySignature, guardianSignature, 0)).to.be.revertedWith("invalid signature");
+    await expect(wallet.execute(to, data, "0x", "0x", 0)).to.be.revertedWith("invalid signature");
 
     // success case
     expect(await greeter.greet()).to.equal("Hello");
-    await wallet.execute(to, calldata, signerSignature, guardianSignature, 0);
+    await wallet.execute(to, data, signerSignature, guardianSignature, 0);
     expect(await greeter.greet()).to.equal("Hola");
     expect(await wallet.nonce()).to.equal(1);
   });
@@ -90,7 +87,7 @@ describe("ArgentWallet", () => {
 
     const [signerSignature, guardianSignature, thirdPartySignature] = await getSignatures(
       [signer, guardian, thirdParty],
-      { selector: selectors.changeSigner, data: newSigner.address },
+      { data: ethers.utils.hexConcat([selectors.changeSigner, newSigner.address]) },
     );
 
     // failures cases
@@ -110,7 +107,7 @@ describe("ArgentWallet", () => {
 
     const [signerSignature, guardianSignature, thirdPartySignature] = await getSignatures(
       [signer, guardian, thirdParty],
-      { selector: selectors.changeGuardian, data: newGuardian.address },
+      { data: ethers.utils.hexConcat([selectors.changeGuardian, newGuardian.address]) },
     );
 
     // failures cases
@@ -128,7 +125,7 @@ describe("ArgentWallet", () => {
   it("should trigger signer escape", async () => {
     const [signerSignature, guardianSignature, thirdPartySignature] = await getSignatures(
       [signer, guardian, thirdParty],
-      { selector: selectors.triggerEscape, data: signer.address },
+      { data: ethers.utils.hexConcat([selectors.triggerEscape, signer.address]) },
     );
 
     // failures cases
@@ -149,12 +146,13 @@ describe("ArgentWallet", () => {
   it("should cancel signer escape", async () => {
     let signerSignature, guardianSignature;
 
-    [signerSignature] = await getSignatures([signer], { selector: selectors.triggerEscape, data: signer.address });
+    [signerSignature] = await getSignatures([signer], { data: ethers.utils.hexConcat([selectors.triggerEscape, signer.address]) });
+      
     await wallet.triggerEscape(signer.address, signerSignature, 0);
 
     [signerSignature, guardianSignature] = await getSignatures(
       [signer, guardian], 
-      { selector: selectors.cancelEscape, data: "0x" }
+      { data: ethers.utils.hexConcat([selectors.cancelEscape, "0x"]) },
     );
     await wallet.cancelEscape(signerSignature, guardianSignature, 1);
   });
@@ -163,7 +161,7 @@ describe("ArgentWallet", () => {
     const newSigner = ethers.Wallet.createRandom();
     let guardianSignature;
 
-    [guardianSignature] = await getSignatures([guardian], { selector: selectors.triggerEscape, data: guardian.address });
+    [guardianSignature] = await getSignatures([guardian], { data: ethers.utils.hexConcat([selectors.triggerEscape, guardian.address]) });
     await wallet.triggerEscape(guardian.address, guardianSignature, 0);
 
     // advance time
@@ -172,7 +170,7 @@ describe("ArgentWallet", () => {
     await ethers.provider.send("evm_mine", []);
 
     // success case
-    [guardianSignature] = await getSignatures([guardian], { selector: selectors.escapeSigner, data: newSigner.address });
+    [guardianSignature] = await getSignatures([guardian], { data: ethers.utils.hexConcat([selectors.escapeSigner, newSigner.address]) });
     await wallet.escapeSigner(newSigner.address, guardianSignature, 1);
     expect(await wallet.callStatic["signer"]()).to.equal(newSigner.address);
     expect(await wallet.escape()).to.deep.equal([BigNumber.from(0), ethers.constants.AddressZero]);
