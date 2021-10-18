@@ -111,6 +111,7 @@ contract ArgentWallet is IArgentWallet {
 
     function escapeSigner(address _newSigner, bytes calldata _guardianSignature, uint256 _nonce) external {
         require(_newSigner != address(0), "null _newSigner");
+        require(escape.caller == guardian, "invalid escape.caller");
         require(escape.activeAt <= block.timestamp, "no active escape");
         validateAndBumpNonce(_nonce);
 
@@ -123,6 +124,7 @@ contract ArgentWallet is IArgentWallet {
 
     function escapeGuardian(address _newGuardian, bytes calldata _signerSignature, uint256 _nonce) external {
         require(_newGuardian != address(0), "null _newGuardian");
+        require(escape.caller == signer, "invalid escape.signer");
         require(escape.activeAt <= block.timestamp, "no active escape");
         validateAndBumpNonce(_nonce);
 
