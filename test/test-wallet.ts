@@ -16,7 +16,6 @@ interface ISignedMessage {
 describe("ArgentWallet", () => {
   const signer = ethers.Wallet.createRandom();
   const guardian = ethers.Wallet.createRandom();
-  const l1Address = ethers.Wallet.createRandom();
   const thirdParty = ethers.Wallet.createRandom();
 
   let ArgentWallet: ContractFactory;
@@ -24,7 +23,6 @@ describe("ArgentWallet", () => {
   let selectors = {
     changeSigner: "",
     changeGuardian: "",
-    changeL1Address: "",
     triggerEscape: "",
     cancelEscape: "",
     escapeSigner: "",
@@ -50,7 +48,7 @@ describe("ArgentWallet", () => {
   });
 
   beforeEach(async () => {
-    wallet = await ArgentWallet.deploy(signer.address, guardian.address, l1Address.address) as ArgentWallet;
+    wallet = await ArgentWallet.deploy(signer.address, guardian.address) as ArgentWallet;
     await wallet.deployed();
   });
 
@@ -126,8 +124,6 @@ describe("ArgentWallet", () => {
     expect(await wallet.guardian()).to.equal(newGuardian.address);
     expect(await wallet.nonce()).to.equal(1);
   });
-
-  // TODO: change L1 address
 
   it("should trigger signer escape", async () => {
     const [signerSignature, guardianSignature, thirdPartySignature] = await getSignatures(

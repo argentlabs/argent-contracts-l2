@@ -10,7 +10,6 @@ interface IArgentWallet {
 
     function signer() external view returns (address);
     function guardian() external view returns (address);
-    function l1Address() external view returns (address);
 
     function execute(
         address _to,
@@ -30,13 +29,6 @@ interface IArgentWallet {
 
     function changeGuardian(
         address _newGuardian,
-        bytes calldata _signerSignature,
-        bytes calldata _guardianSignature,
-        uint256 _nonce
-    ) external;
-
-    function changeL1Address(
-        address _newL1Address,
         bytes calldata _signerSignature,
         bytes calldata _guardianSignature,
         uint256 _nonce

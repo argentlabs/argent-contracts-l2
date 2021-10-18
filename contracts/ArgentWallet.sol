@@ -8,7 +8,6 @@ contract ArgentWallet is IArgentWallet {
     uint256 public constant ESCAPE_SECURITY_PERIOD = 1 weeks;
     bytes4 public constant CHANGE_SIGNER_SELECTOR = bytes4(keccak256("changeSigner(address,bytes,bytes,uint256)"));
     bytes4 public constant CHANGE_GUARDIAN_SELECTOR = bytes4(keccak256("changeGuardian(address,bytes,bytes,uint256)"));
-    bytes4 public constant CHANGE_L1_ADDRESS_SELECTOR = bytes4(keccak256("changeL1Address(address,bytes,bytes,uint256)"));
     bytes4 public constant TRIGGER_ESCAPE_SELECTOR = bytes4(keccak256("triggerEscape(address,bytes,uint256)"));
     bytes4 public constant CANCEL_ESCAPE_SELECTOR = bytes4(keccak256("cancelEscape(bytes,bytes,uint256)"));
     bytes4 public constant ESCAPE_SIGNER_SELECTOR = bytes4(keccak256("escapeSigner(address,bytes,uint256)"));
@@ -17,13 +16,11 @@ contract ArgentWallet is IArgentWallet {
     uint256 public nonce = 0;
     address public signer;
     address public guardian;
-    address public l1Address;
     Escape public escape = Escape(0, address(0));
 
-    constructor(address _signer, address _guardian, address _l1Address) {
+    constructor(address _signer, address _guardian) {
         signer = _signer;
         guardian = _guardian;
-        l1Address = _l1Address;
     }
 
     function execute(
@@ -78,23 +75,6 @@ contract ArgentWallet is IArgentWallet {
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
 
         guardian = _newGuardian;
-    }
-
-    function changeL1Address(
-        address _newL1Address,
-        bytes calldata _signerSignature,
-        bytes calldata _guardianSignature,
-        uint256 _nonce
-    )
-        external
-    {
-        require(_newL1Address != address(0), "null _newL1Address");
-        validateAndBumpNonce(_nonce);
-
-        bytes32 signedHash = getSignedHash(address(this), CHANGE_GUARDIAN_SELECTOR, abi.encodePacked(_newL1Address), _nonce);
-        validateSignatures(signedHash, _signerSignature, _guardianSignature);
-
-        l1Address = _newL1Address;
     }
 
     function triggerEscape(address _escaper, bytes calldata _signature, uint256 _nonce) external {
