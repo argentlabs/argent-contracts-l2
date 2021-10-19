@@ -13,6 +13,7 @@ interface IArgentWallet {
 
     function execute(
         address _to,
+        uint256 _value,
         bytes calldata _data,
         bytes calldata _signerSignature,
         bytes calldata _guardianSignature,

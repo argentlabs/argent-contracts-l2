@@ -1,13 +1,14 @@
 import { BigNumber, BigNumberish } from "@ethersproject/bignumber";
 import { BytesLike } from "@ethersproject/bytes";
-import { ContractFactory } from "@ethersproject/contracts";
 import { Wallet } from "@ethersproject/wallet";
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
-import { ArgentWallet, Greeter } from "../typechain";
+import { ArgentWallet, ArgentWallet__factory, Greeter } from "../typechain";
 
 interface ISignedMessage {
   to?: string;
+  value?: BigNumberish;
   data: BytesLike;
   nonce?: BigNumberish;
 }
@@ -17,8 +18,10 @@ describe("ArgentWallet", () => {
   const guardian = ethers.Wallet.createRandom();
   const thirdParty = ethers.Wallet.createRandom();
 
-  let ArgentWallet: ContractFactory;
+  let deployer: SignerWithAddress;
+  let ArgentWallet: ArgentWallet__factory;
   let wallet: ArgentWallet;
+  let greeter: Greeter;
   let selectors = {
     changeSigner: "",
     changeGuardian: "",
@@ -28,27 +31,30 @@ describe("ArgentWallet", () => {
     escapeGuardian: "",
   };
 
-  const getSignatures = async (signers: Wallet[], { to, data, nonce }: ISignedMessage) => {
+  const getSignatures = async (signers: Wallet[], { to, value = 0, data, nonce }: ISignedMessage) => {
     if (typeof to === "undefined") {
       to = wallet.address;
     }
     if (typeof nonce === "undefined") {
       nonce = await wallet.nonce();
     }
-    const messageHex = await wallet.getSignedMessage(to, data, nonce);
+    const messageHex = await wallet.getSignedMessage(to, value, data, nonce);
     const messageBytes = ethers.utils.arrayify(messageHex);
     const signatures = signers.map((signer) => signer.signMessage(messageBytes))
     return Promise.all(signatures);
   }
 
   before(async () => {
+    [deployer] = await ethers.getSigners();
     ArgentWallet = await ethers.getContractFactory("ArgentWallet");
     selectors = Object.fromEntries(Object.keys(selectors).map((method) => [method, ArgentWallet.interface.getSighash(method)])) as any;
+
+    const GreeterContract = await ethers.getContractFactory("Greeter");
+    greeter = await GreeterContract.deploy("Hello");
   });
 
   beforeEach(async () => {
-    wallet = await ArgentWallet.deploy(signer.address, guardian.address) as ArgentWallet;
-    await wallet.deployed();
+    wallet = await ArgentWallet.deploy(signer.address, guardian.address);
   });
 
   it("should be in initial state", async () => {
@@ -56,10 +62,14 @@ describe("ArgentWallet", () => {
     expect(await wallet.escape()).to.deep.equal([BigNumber.from(0), ethers.constants.AddressZero]);
   });
 
-  it("should execute a transaction", async () => {
-    const GreeterContract = await ethers.getContractFactory("Greeter");
-    const greeter = await GreeterContract.deploy("Hello") as Greeter;
+  it("should receive value", async () => {
+    const balanceBefore = await ethers.provider.getBalance(wallet.address);
+    await deployer.sendTransaction({ to: wallet.address, value: ethers.utils.parseEther("1") });
+    const balanceAfter = await ethers.provider.getBalance(wallet.address);
+    expect(balanceAfter.gt(balanceBefore)).to.be.true;
+  });
 
+ it("should execute a transaction", async () => {
     const to = greeter.address;
     const data = greeter.interface.encodeFunctionData("setGreeting", ["Hola"]);
 
@@ -69,17 +79,32 @@ describe("ArgentWallet", () => {
     );
 
     // failures cases
-    await expect(wallet.execute(ethers.constants.AddressZero, data, signerSignature, guardianSignature, 0)).to.be.revertedWith("null _to");
-    await expect(wallet.execute(to, data, signerSignature, guardianSignature, 1)).to.be.revertedWith("invalid nonce");
-    await expect(wallet.execute(to, data, signerSignature, thirdPartySignature, 0)).to.be.revertedWith("invalid signature");
-    await expect(wallet.execute(to, data, thirdPartySignature, guardianSignature, 0)).to.be.revertedWith("invalid signature");
-    await expect(wallet.execute(to, data, "0x", "0x", 0)).to.be.revertedWith("invalid signature");
+    await expect(wallet.execute(ethers.constants.AddressZero, 0, data, signerSignature, guardianSignature, 0)).to.be.revertedWith("null _to");
+    await expect(wallet.execute(to, 0, data, signerSignature, guardianSignature, 1)).to.be.revertedWith("invalid nonce");
+    await expect(wallet.execute(to, 0, data, signerSignature, thirdPartySignature, 0)).to.be.revertedWith("invalid signature");
+    await expect(wallet.execute(to, 0, data, thirdPartySignature, guardianSignature, 0)).to.be.revertedWith("invalid signature");
+    await expect(wallet.execute(to, 0, data, "0x", "0x", 0)).to.be.revertedWith("invalid signature");
 
     // success case
     expect(await greeter.greet()).to.equal("Hello");
-    await wallet.execute(to, data, signerSignature, guardianSignature, 0);
+    await wallet.execute(to, 0, data, signerSignature, guardianSignature, 0);
     expect(await greeter.greet()).to.equal("Hola");
     expect(await wallet.nonce()).to.equal(1);
+  });
+
+  it("should execute a transaction with value", async () => {
+    await deployer.sendTransaction({ to: wallet.address, value: ethers.utils.parseEther("1") });
+
+    const to = greeter.address;
+    const data = greeter.interface.encodeFunctionData("greetWithGift");
+
+    const value = ethers.utils.parseEther("0.1");
+    const [signerSignature, guardianSignature] = await getSignatures([signer, guardian], { to, value, data });
+
+    const balanceBefore = await ethers.provider.getBalance(wallet.address);
+    await wallet.execute(to, value, data, signerSignature, guardianSignature, 0);
+    const balanceAfter = await ethers.provider.getBalance(wallet.address);
+    expect(balanceAfter.lt(balanceBefore)).to.be.true;
   });
 
   it("should change signer", async () => {

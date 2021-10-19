@@ -12,7 +12,15 @@ contract Greeter {
         return greeting;
     }
 
+    function greetWithGift() public payable returns (string memory) {
+        return greeting;
+    }
+
     function setGreeting(string memory _greeting) public {
         greeting = _greeting;
+    }
+
+    receive() external payable {
+
     }
 }

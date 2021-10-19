@@ -25,6 +25,7 @@ contract ArgentWallet is IArgentWallet {
 
     function execute(
         address _to,
+        uint256 _value,
         bytes calldata _data,
         bytes calldata _signerSignature,
         bytes calldata _guardianSignature,
@@ -36,10 +37,10 @@ contract ArgentWallet is IArgentWallet {
         require(_to != address(0), "null _to");
         validateAndBumpNonce(_nonce);
 
-        bytes32 signedHash = getSignedHash(_to, _data, _nonce);
+        bytes32 signedHash = getSignedHash(_to, _value, _data, _nonce);
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
 
-        (success,) = _to.call(_data);
+        (success,) = _to.call{value: _value}(_data);
         require(success, "execution failed");
     }
 
@@ -54,7 +55,7 @@ contract ArgentWallet is IArgentWallet {
         require(_newSigner != address(0), "null _newSigner");
         validateAndBumpNonce(_nonce);
 
-        bytes32 signedHash = getSignedHash(address(this), abi.encodePacked(CHANGE_SIGNER_SELECTOR, _newSigner), _nonce);
+        bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(CHANGE_SIGNER_SELECTOR, _newSigner), _nonce);
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
 
         signer = _newSigner;
@@ -71,7 +72,7 @@ contract ArgentWallet is IArgentWallet {
         require(_newGuardian != address(0), "null _newGuardian");
         validateAndBumpNonce(_nonce);
 
-        bytes32 signedHash = getSignedHash(address(this), abi.encodePacked(CHANGE_GUARDIAN_SELECTOR, _newGuardian), _nonce);
+        bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(CHANGE_GUARDIAN_SELECTOR, _newGuardian), _nonce);
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
 
         guardian = _newGuardian;
@@ -86,7 +87,7 @@ contract ArgentWallet is IArgentWallet {
             require(_escaper == signer, "invalid _escaper");
         }
 
-        bytes32 signedHash = getSignedHash(address(this), abi.encodePacked(TRIGGER_ESCAPE_SELECTOR, _escaper), _nonce);
+        bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(TRIGGER_ESCAPE_SELECTOR, _escaper), _nonce);
 
         if (_escaper == signer) {
             validateSignerSignature(signedHash, _signature);
@@ -103,7 +104,7 @@ contract ArgentWallet is IArgentWallet {
         // require(escape.activeAt <= block.timestamp, "not escaping");
         validateAndBumpNonce(_nonce);
 
-        bytes32 signedHash = getSignedHash(address(this), abi.encodePacked(CANCEL_ESCAPE_SELECTOR), _nonce);
+        bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(CANCEL_ESCAPE_SELECTOR), _nonce);
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
 
         delete escape;
@@ -115,7 +116,7 @@ contract ArgentWallet is IArgentWallet {
         require(escape.activeAt <= block.timestamp, "no active escape");
         validateAndBumpNonce(_nonce);
 
-        bytes32 signedHash = getSignedHash(address(this), abi.encodePacked(ESCAPE_SIGNER_SELECTOR, _newSigner), _nonce);
+        bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(ESCAPE_SIGNER_SELECTOR, _newSigner), _nonce);
         validateGuardianSignature(signedHash, _guardianSignature);
 
         signer = _newSigner;
@@ -128,7 +129,7 @@ contract ArgentWallet is IArgentWallet {
         require(escape.activeAt <= block.timestamp, "no active escape");
         validateAndBumpNonce(_nonce);
 
-        bytes32 signedHash = getSignedHash(address(this), abi.encodePacked(ESCAPE_GUARDIAN_SELECTOR, _newGuardian), _nonce);
+        bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(ESCAPE_GUARDIAN_SELECTOR, _newGuardian), _nonce);
         validateSignerSignature(signedHash, _signerSignature);
 
         guardian = _newGuardian;
@@ -137,14 +138,14 @@ contract ArgentWallet is IArgentWallet {
 
     // public 
 
-    function getSignedMessage(address _to, bytes memory _data, uint256 _nonce) public view returns (bytes32) {
-        return keccak256(abi.encodePacked(_to, _data, _nonce, block.chainid));
+    function getSignedMessage(address _to, uint256 _value, bytes memory _data, uint256 _nonce) public view returns (bytes32) {
+        return keccak256(abi.encodePacked(_to, _value, _data, _nonce, block.chainid));
     }
 
     // internal
 
-    function getSignedHash(address _to, bytes memory _data, uint256 _nonce) internal view returns (bytes32) {
-        bytes32 message = getSignedMessage(_to, _data, _nonce);
+    function getSignedHash(address _to, uint256 _value, bytes memory _data, uint256 _nonce) internal view returns (bytes32) {
+        bytes32 message = getSignedMessage(_to, _value, _data, _nonce);
         return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", message));
     }
 
@@ -181,11 +182,15 @@ contract ArgentWallet is IArgentWallet {
         bytes32 s;
         // solhint-disable-next-line no-inline-assembly
         assembly {
-            v := byte(0, calldataload(add(_signature.offset, 0x40)))
             r := calldataload(_signature.offset)
             s := calldataload(add(_signature.offset, 0x20))
+            v := byte(0, calldataload(add(_signature.offset, 0x40)))
         }
 
         require(_account == ecrecover(_signedHash, v, r, s), "invalid signature");
+    }
+
+    receive() external payable {
+
     }
 }
