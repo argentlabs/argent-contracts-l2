@@ -24,5 +24,9 @@ export const deployAll = async function ({ signer, guardian }: any) {
 
   console.log('==testCounter=', testCounter.address)
 
-  return { entryPoint, wallet, testCounter };
+  return { 
+    entryPointAddress: entryPoint.address,
+    walletAddress: wallet.address,
+    testCounterAddress: testCounter.address,
+  };
 }
