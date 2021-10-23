@@ -34,6 +34,9 @@ const config: HardhatUserConfig = {
       accounts: { mnemonic: process.env.MNEMONIC },
     },
   },
+  mocha: {
+    timeout: 1000000
+  },
   gasReporter: {
     enabled: process.env.REPORT_GAS !== undefined,
     currency: "USD",

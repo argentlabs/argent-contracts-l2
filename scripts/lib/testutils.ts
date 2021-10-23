@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {ethers} from "hardhat";
 import {defaultAbiCoder, hexConcat, parseEther} from "ethers/lib/utils";
 import {Contract, ContractReceipt, Wallet} from "ethers";
@@ -59,8 +58,8 @@ export function createWalletOwner(privkeyBase?: string): Wallet {
 
 export function callDataCost(data: string): number {
   return ethers.utils.arrayify(data)
-    .map(x => x == 0 ? 4 : 16)
-    .reduce((sum, x) => sum + x)
+    .map((x: any) => x == 0 ? 4 : 16)
+    .reduce((sum: any, x: any) => sum + x)
 }
 
 export async function calcGasUsage(rcpt: ContractReceipt, entryPoint: EntryPoint, redeemerAddress?: string) {
@@ -79,6 +78,7 @@ export async function calcGasUsage(rcpt: ContractReceipt, entryPoint: EntryPoint
 
 //helper function to create a constructor call to our wallet.
 export function WalletConstructor(entryPoint: string, owner: string): BytesLike {
+  // @ts-ignore
   return new SimpleWallet__factory().getDeployTransaction(entryPoint, owner).data!
 }
 
@@ -198,6 +198,7 @@ export async function checkForBannedOps(txHash: string) {
 export async function deployEntryPoint(perOpOverhead:number, unstakeDelayBlocks:number ): Promise<EntryPoint> {
   let provider = ethers.provider;
   const create2factory = new Create2Factory(provider)
+  // @ts-ignore
   const epf = new EntryPoint__factory()
   const ctrParams = defaultAbiCoder.encode(['address', 'uint256', 'uint256'],
     [Create2Factory.contractAddress, perOpOverhead, unstakeDelayBlocks])

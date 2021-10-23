@@ -1,21 +1,20 @@
-import {BigNumber, Bytes, Contract, ethers, Signer} from "ethers";
+import {BigNumber, Bytes, ethers, Signer} from "ethers";
 import {BaseProvider, Provider, TransactionRequest} from "@ethersproject/providers";
 import {Event} from 'ethers'
 import {Deferrable, resolveProperties} from "@ethersproject/properties";
-import {SimpleWallet, SimpleWallet__factory, EntryPoint, EntryPoint__factory} from "../../../account-abstraction/typechain";
+import {ArgentWallet, ArgentWallet__factory, EntryPoint, EntryPoint__factory} from "../../typechain";
 import {BytesLike, hexValue} from "@ethersproject/bytes";
 import {TransactionResponse} from "@ethersproject/abstract-provider";
-import {fillAndSign} from "../../../account-abstraction/test/UserOp";
-import {UserOperation} from "../../../account-abstraction/test/UserOperation";
+import {fillAndSign} from "./UserOp";
+import {UserOperation} from "./UserOperation";
 import {TransactionReceipt} from "@ethersproject/abstract-provider/src.ts/index";
 import {clearInterval} from "timers";
-import {use} from "chai";
-//import axios from 'axios'
+import "./aa.init";
 
 const axios: any = {}
 export type SendUserOp = (userOp: UserOperation) => Promise<TransactionResponse | void>
 
-export let debug = false
+export let debug = true
 
 /**
  * send a request using rpc.
@@ -191,9 +190,10 @@ export class AAProvider extends BaseProvider {
  * a signer that wraps account-abstraction.
  */
 export class AASigner extends Signer {
-  _wallet?: SimpleWallet
+  _wallet?: ArgentWallet
 
   private _isPhantom = true
+  public signer: Signer;
   public entryPoint: EntryPoint
 
   //TODO: if needed, then async'ly initialize from provider.
@@ -201,14 +201,15 @@ export class AASigner extends Signer {
 
   /**
    * create account abstraction signer
-   * @param signer - the underlying signer. has no funds (=can't send TXs)
+   * @param signers - the underlying signer. has no funds (=can't send TXs)
    * @param entryPoint the entryPoint contract. used for read-only operations
    * @param sendUserOp function to actually send the UserOp to the entryPoint.
    * @param index - index of this wallet for this signer.
    */
-  constructor(readonly signer: Signer, readonly entryPointAddress: string, readonly sendUserOp: SendUserOp, readonly index = 0, readonly provider = signer.provider) {
+  constructor(readonly signers: Signer[], readonly entryPointAddress: string, readonly sendUserOp: SendUserOp, readonly index = 0, readonly provider = signers[0].provider) {
     super();
-    this.entryPoint = EntryPoint__factory.connect(entryPointAddress, signer)
+    [this.signer] = signers;
+    this.entryPoint = EntryPoint__factory.connect(entryPointAddress, this.signer)
   }
 
   //connect to a specific pre-deployed address
@@ -217,10 +218,10 @@ export class AASigner extends Signer {
     if (this._wallet != null) {
       throw Error('already connected to wallet')
     }
-    if (await this.provider!.getCode(address).then(code => code.length) <= 2) {
+    if (await this.provider!.getCode(address).then((code: any) => code.length) <= 2) {
       throw new Error('cannot connect to non-existing contract')
     }
-    this._wallet = SimpleWallet__factory.connect(address, this.signer)
+    this._wallet = ArgentWallet__factory.connect(address, this.signer)
     this._isPhantom = false;
   }
 
@@ -229,9 +230,11 @@ export class AASigner extends Signer {
   }
 
   async _deploymentTransaction(): Promise<BytesLike> {
-    let ownerAddress = await this.signer.getAddress();
-    return new SimpleWallet__factory()
-      .getDeployTransaction(this.entryPoint.address, ownerAddress).data!
+    let signerAddress = await this.signer.getAddress();
+    let guardianAddress = await this.signers[1].getAddress();
+    // @ts-ignore
+    return new ArgentWallet__factory()
+      .getDeployTransaction(signerAddress, guardianAddress, this.entryPoint.address).data!
   }
 
   async getAddress(): Promise<string> {
@@ -247,7 +250,7 @@ export class AASigner extends Signer {
     throw new Error('signMessage: unsupported by AA')
   }
 
-  async getWallet(): Promise<SimpleWallet> {
+  async getWallet(): Promise<ArgentWallet> {
 
     await this.syncAccount()
     return this._wallet!
@@ -256,7 +259,6 @@ export class AASigner extends Signer {
   //fabricate a response in a format usable by ethers users...
   async userEventResponse(userOp: UserOperation): Promise<TransactionResponse> {
     const entryPoint = this.entryPoint
-    const provider = entryPoint.provider
     const resp: TransactionResponse = {
       hash: `userop:${userOp.sender}-${userOp.nonce}`,  //unlike real tx, we can't give hash before TX is mined
       confirmations: 0,
@@ -305,15 +307,15 @@ export class AASigner extends Signer {
 
     const userOp = await this._createUserOperation(transaction)
     //get response BEFORE sending request: the response waits for events, which might be triggered before the actual send returns.
-    let reponse = await this.userEventResponse(userOp);
+    let response = await this.userEventResponse(userOp);
     await this.sendUserOp(userOp)
-    return reponse
+    return response
   }
 
   async syncAccount() {
     if (!this._wallet) {
       const address = await this.entryPoint.getSenderAddress(await this._deploymentTransaction(), this.index)
-      this._wallet = SimpleWallet__factory.connect(address, this.signer)
+      this._wallet = ArgentWallet__factory.connect(address, this.signer)
     }
 
     //once an account is deployed, it can no longer be a phantom.
@@ -357,7 +359,7 @@ export class AASigner extends Signer {
       callGas: tx.gasLimit,
       maxPriorityFeePerGas,
       maxFeePerGas,
-    }, this.signer, this.entryPoint)
+    }, this.signers, this.entryPoint)
 
     return userOp
   }

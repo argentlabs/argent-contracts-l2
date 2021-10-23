@@ -2,8 +2,11 @@
 pragma solidity ^0.8.7;
 
 import { IArgentWallet } from "./IArgentWallet.sol";
+import { UserOperation, UserOperationLib } from "./lib/UserOperation.sol";
 
 contract ArgentWallet is IArgentWallet {
+
+    using UserOperationLib for UserOperation;
 
     uint256 public constant ESCAPE_SECURITY_PERIOD = 1 weeks;
     bytes4 public constant CHANGE_SIGNER_SELECTOR = bytes4(keccak256("changeSigner(address,bytes,bytes,uint256)"));
@@ -13,14 +16,24 @@ contract ArgentWallet is IArgentWallet {
     bytes4 public constant ESCAPE_SIGNER_SELECTOR = bytes4(keccak256("escapeSigner(address,bytes,uint256)"));
     bytes4 public constant ESCAPE_GUARDIAN_SELECTOR = bytes4(keccak256("escapeGuardian(address,bytes,uint256)"));
 
-    uint256 public nonce;
-    address public signer;
+    SignerNonce public signerNonce;
     address public guardian;
     Escape public escape;
 
-    constructor(address _signer, address _guardian) {
-        signer = _signer;
+    address public entryPoint;
+
+    constructor(address _signer, address _guardian, address _entryPoint) {
+        signerNonce.signer = _signer;
         guardian = _guardian;
+        entryPoint = _entryPoint;
+    }
+
+    function nonce() public view returns (uint) {
+        return signerNonce.nonce;
+    }
+
+    function signer() public view returns(address) {
+        return signerNonce.signer;
     }
 
     function execute(
@@ -35,7 +48,6 @@ contract ArgentWallet is IArgentWallet {
         returns (bool success)
     {
         require(_to != address(0), "null _to");
-        validateAndBumpNonce(_nonce);
 
         bytes32 signedHash = getSignedHash(_to, _value, _data, _nonce);
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
@@ -53,12 +65,11 @@ contract ArgentWallet is IArgentWallet {
         external
     {
         require(_newSigner != address(0), "null _newSigner");
-        validateAndBumpNonce(_nonce);
 
         bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(CHANGE_SIGNER_SELECTOR, _newSigner), _nonce);
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
 
-        signer = _newSigner;
+        signerNonce.signer = _newSigner;
     }
 
     function changeGuardian(
@@ -70,7 +81,6 @@ contract ArgentWallet is IArgentWallet {
         external
     {
         require(_newGuardian != address(0), "null _newGuardian");
-        validateAndBumpNonce(_nonce);
 
         bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(CHANGE_GUARDIAN_SELECTOR, _newGuardian), _nonce);
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
@@ -80,16 +90,15 @@ contract ArgentWallet is IArgentWallet {
 
     function triggerEscape(address _escaper, bytes calldata _signature, uint256 _nonce) external {
         require(_escaper != address(0), "null _escaper");
-        validateAndBumpNonce(_nonce);
 
         if (escape.activeAt != 0) {
             require(escape.caller == guardian, "invalid escape.caller");
-            require(_escaper == signer, "invalid _escaper");
+            require(_escaper == signer(), "invalid _escaper");
         }
 
         bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(TRIGGER_ESCAPE_SELECTOR, _escaper), _nonce);
 
-        if (_escaper == signer) {
+        if (_escaper == signer()) {
             validateSignerSignature(signedHash, _signature);
         } else {
             validateGuardianSignature(signedHash, _signature);
@@ -102,7 +111,6 @@ contract ArgentWallet is IArgentWallet {
         require(escape.activeAt != 0 && escape.caller != address(0), "not escaping");
         // or?
         // require(escape.activeAt <= block.timestamp, "not escaping");
-        validateAndBumpNonce(_nonce);
 
         bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(CANCEL_ESCAPE_SELECTOR), _nonce);
         validateSignatures(signedHash, _signerSignature, _guardianSignature);
@@ -114,26 +122,94 @@ contract ArgentWallet is IArgentWallet {
         require(_newSigner != address(0), "null _newSigner");
         require(escape.caller == guardian, "invalid escape.caller");
         require(escape.activeAt <= block.timestamp, "no active escape");
-        validateAndBumpNonce(_nonce);
 
         bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(ESCAPE_SIGNER_SELECTOR, _newSigner), _nonce);
         validateGuardianSignature(signedHash, _guardianSignature);
 
-        signer = _newSigner;
+        signerNonce.signer = _newSigner;
         delete escape;
     }
 
     function escapeGuardian(address _newGuardian, bytes calldata _signerSignature, uint256 _nonce) external {
         require(_newGuardian != address(0), "null _newGuardian");
-        require(escape.caller == signer, "invalid escape.signer");
+        require(escape.caller == signer(), "invalid escape.signer");
         require(escape.activeAt <= block.timestamp, "no active escape");
-        validateAndBumpNonce(_nonce);
 
         bytes32 signedHash = getSignedHash(address(this), 0, abi.encodePacked(ESCAPE_GUARDIAN_SELECTOR, _newGuardian), _nonce);
         validateSignerSignature(signedHash, _signerSignature);
 
         guardian = _newGuardian;
         delete escape;
+    }
+
+    // AA
+
+    modifier onlySigner() {
+        // directly from signer key, or through the entryPoint (which gets redirected through execFromEntryPoint)
+        require(msg.sender == signer() || msg.sender == address(this), "only signer");
+        _;
+    }
+
+    function updateEntryPoint(address _entryPoint) external onlySigner {
+        emit EntryPointChanged(entryPoint, _entryPoint);
+        entryPoint = _entryPoint;
+    }
+
+    function _requireFromEntryPoint() internal view {
+        require(msg.sender == address(entryPoint), "wallet: not from EntryPoint");
+    }
+
+    function verifyUserOp(UserOperation calldata userOp, uint requiredPrefund) external override {
+        _requireFromEntryPoint();
+        _validateSignature(userOp);
+        _validateAndIncrementNonce(userOp);
+        _payPrefund(requiredPrefund);
+    }
+
+    function _validateSignature(UserOperation calldata userOp) internal view {
+        bytes4 selector = bytes4(userOp.callData);
+        bytes32 signedHash = userOp.hash();
+
+        if (selector == CHANGE_SIGNER_SELECTOR) {
+            bytes calldata _signerSignature = userOp.signature[:65];
+            bytes calldata _guardianSignature = userOp.signature[65:130];
+            validateSignatures(signedHash, _signerSignature, _guardianSignature);
+        }
+    }
+
+    function _validateAndIncrementNonce(UserOperation calldata userOp) internal {
+        //during construction, the "nonce" field hold the salt.
+        // if we assert it is zero, then we allow only a single wallet per owner.
+        if (userOp.initCode.length == 0) {
+            require(signerNonce.nonce++ == userOp.nonce, "wallet: invalid nonce");
+        }
+    }
+
+    function _payPrefund(uint requiredPrefund) internal {
+        if (requiredPrefund != 0) {
+            (bool success) = payable(msg.sender).send(requiredPrefund);
+            (success);
+            //ignore failure (its EntryPoint's job to verify, not wallet.)
+        }
+    }
+
+    function exec(address dest, uint value, bytes calldata func) external onlySigner {
+        _call(dest, value, func);
+    }
+
+    //called by entryPoint, only after verifyUserOp succeeded.
+    function execFromEntryPoint(address dest, uint value, bytes calldata func) external {
+        _requireFromEntryPoint();
+        _call(dest, value, func);
+    }
+
+    function _call(address sender, uint value, bytes memory data) internal {
+        (bool success, bytes memory result) = sender.call{value : value}(data);
+        if (!success) {
+            assembly {
+                revert(result, add(result, 32))
+            }
+        }
     }
 
     // public 
@@ -149,11 +225,6 @@ contract ArgentWallet is IArgentWallet {
         return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", message));
     }
 
-    function validateAndBumpNonce(uint256 _messageNonce) internal {
-        require(_messageNonce == nonce, "invalid nonce");
-        nonce += 1;
-    }
-
     function validateSignatures(
         bytes32 _signedHash,
         bytes calldata _signerSignature,
@@ -162,12 +233,12 @@ contract ArgentWallet is IArgentWallet {
         internal 
         view
     {
-        validateSignature(_signedHash, _signerSignature, signer);
+        validateSignature(_signedHash, _signerSignature, signer());
         validateSignature(_signedHash, _guardianSignature, guardian);
     }
 
     function validateSignerSignature(bytes32 _signedHash, bytes calldata _signature) internal view {
-        validateSignature(_signedHash, _signature, signer);
+        validateSignature(_signedHash, _signature, signer());
     }
 
     function validateGuardianSignature(bytes32 _signedHash, bytes calldata _signature) internal view {
