@@ -1,17 +1,28 @@
-import { ethers } from "hardhat";
+import hre from "hardhat";
+import {Create2Factory} from "./lib/Create2Factory";
+import {ethers} from "hardhat";
 
-(async () => {
-  try {
-    // We get the contract to deploy
-    const Greeter = await ethers.getContractFactory("Sandbox");
-    const greeter = await Greeter.deploy();
+const PER_OP_OVERHEAD = 22000;
+const UNSTAKE_DELAY_BLOCKS = 100;
 
-    await greeter.deployed();
-    await greeter.test();
+export const deployAll = async function ({ signer, guardian }: any) {
+  console.log(`deployAll`)
+  const EntryPoint = await ethers.getContractFactory("EntryPoint");
+  const entryPoint = await EntryPoint.deploy(Create2Factory.contractAddress, PER_OP_OVERHEAD, UNSTAKE_DELAY_BLOCKS, {
+    gasLimit: 5e6,
+  })
+  console.log('==entrypoint addr=', entryPoint.address)
 
-    console.log("Greeter deployed to:", greeter.address);
-  } catch (error) {
-    console.error(error);
-    process.exitCode = 1;
-  }
-})();
+  const ArgentWallet = await ethers.getContractFactory("ArgentWallet");
+  const wallet = await ArgentWallet.deploy(signer, guardian, entryPoint.address, {
+    gasLimit: 5e6,
+  })
+  console.log('== wallet=', wallet.address)
+
+  const TestCounter = await ethers.getContractFactory("TestCounter");
+  const testCounter = await TestCounter.deploy({ gasLimit: 2e6 })
+
+  console.log('==testCounter=', testCounter.address)
+
+  return { entryPoint, wallet, testCounter };
+}

@@ -1,16 +1,11 @@
 import hre from "hardhat";
-import { BigNumber, BigNumberish } from "@ethersproject/bignumber";
-import { BytesLike } from "@ethersproject/bytes";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { ArgentWallet, ArgentWallet__factory, EntryPoint, EntryPoint__factory, TestCounter, TestCounter__factory } from "../typechain";
 import { AASigner, localUserOpSender, rpcUserOpSender, SendUserOp } from "../scripts/lib/AASigner";
 import { objdump } from "../scripts/lib/testutils";
-
-const entryPointAddress = "0xF63621e54F16eC6e4A732e44EaA7708935f259eF";
-const testCounterAddress = "0x4B52ceEDE2e695CAeDBC1Cc8E7f9d5Ef18F0EeF5";
-const sendUserOp = rpcUserOpSender(new ethers.providers.JsonRpcProvider(process.env.AA_URL));
+import { deployAll } from "../scripts/deploy";
 
 describe("ArgentWallet", () => {
   let deployer: SignerWithAddress;
@@ -33,21 +28,6 @@ describe("ArgentWallet", () => {
   let currentStake = "";
   let entryPoint: EntryPoint;
 
-  // const getSignatures = async (signers: Wallet[], { to, value = 0, data, nonce }: ISignedMessage) => {
-  //   if (typeof to === "undefined") {
-  //     to = wallet.address;
-  //   }
-  //   if (typeof nonce === "undefined") {
-  //     nonce = await wallet.nonce();
-  //   }
-  //   const messageHex = await wallet.getSignedMessage(to, value, data, nonce);
-  //   const messageBytes = ethers.utils.arrayify(messageHex);
-  //   const promises = signers.map((signer) => signer.signMessage(messageBytes))
-  //   const signatures = Promise.all(promises);
-  //   console.log(`signatures ${signatures}`);
-  //   return signatures;
-  // }
-
   before(async () => {
     [deployer, signer, guardian, thirdParty] = await ethers.getSigners();
     console.log(`deployer ${deployer.address}`);
@@ -56,15 +36,36 @@ describe("ArgentWallet", () => {
     ArgentWallet = await ethers.getContractFactory("ArgentWallet");
     selectors = Object.fromEntries(Object.keys(selectors).map((method) => [method, ArgentWallet.interface.getSighash(method)])) as any;
 
-    // console.log(`deploying ArgentWallet`)
-    const args = [signer.address, guardian.address, entryPointAddress] as const;
-    // wallet = await ArgentWallet.deploy(...args);
-    wallet = ArgentWallet.attach("0x15A83ceCCBC597F4E882596f7aEe28793Ca23Ea3");
-    console.log(`verifying etherscan`)
-    await hre.run("verify:verify", { address: wallet.address, constructorArguments: args });
 
-    console.log(`deployed at ${wallet.address}`)
-    await wallet.deployed();
+    let entryPointAddress, testCounterAddress;
+
+    if (hre.network.name === "hardhat") {
+      console.log(`deploying ArgentWallet`);
+      ({ entryPoint, wallet, testCounter } = await deployAll({ from: deployer, signer: signer.address, guardian: guardian.address }));
+
+      entryPointAddress = entryPoint.address;
+      testCounterAddress = testCounter.address;
+      // hre.run("deploy", { signerAddress: signer.address, guardianAddress: guardian.address });
+      // wallet = await ArgentWallet.deploy(...args);
+      // await wallet.deployed();
+    } else {
+      entryPointAddress = "0xF63621e54F16eC6e4A732e44EaA7708935f259eF";
+      testCounterAddress = "0x4B52ceEDE2e695CAeDBC1Cc8E7f9d5Ef18F0EeF5";
+      wallet = ArgentWallet.attach("0x15A83ceCCBC597F4E882596f7aEe28793Ca23Ea3");
+      // console.log(`verifying etherscan`);
+      // const args = [signer.address, guardian.address, entryPointAddress] as const;
+      // await hre.run("verify:verify", { address: wallet.address, constructorArguments: args });
+    }
+    console.log(`ArgentWallet at ${wallet.address}`)
+
+    let sendUserOp: SendUserOp;
+    if (hre.network.name === "hardhat") {
+      console.log("using local")
+      sendUserOp = localUserOpSender(entryPointAddress, deployer);
+    } else {
+      console.log("using rpc")
+      sendUserOp = rpcUserOpSender(new ethers.providers.JsonRpcProvider(process.env.AA_URL));
+    }
 
     const aaSigner = new AASigner([signer, guardian], entryPointAddress, sendUserOp);
     console.log(`connecting wallet address`)
