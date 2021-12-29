@@ -4,8 +4,6 @@ pragma solidity ^0.8.7;
 import { IArgentWallet } from "./IArgentWallet.sol";
 import { UserOperation, UserOperationLib } from "./lib/UserOperation.sol";
 
-import "hardhat/console.sol";
-
 contract ArgentWallet is IArgentWallet {
 
     using UserOperationLib for UserOperation;
@@ -126,7 +124,7 @@ contract ArgentWallet is IArgentWallet {
 
         if (selector == TRIGGER_ESCAPE_SELECTOR) {
             revert("not implemented");
-            // TODO: validate ONE of the signatures
+            // TODO: validate signer OR guardian and determine which it is
         } else if (selector == ESCAPE_GUARDIAN_SELECTOR) {
             bytes calldata _signerSignature = userOp.signature[:65];
             validateSignerSignature(signedHash, _signerSignature);

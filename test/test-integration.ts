@@ -5,7 +5,7 @@ import { ethers } from "hardhat";
 import { ArgentWallet, ArgentWallet__factory, EntryPoint, EntryPoint__factory, TestCounter, TestCounter__factory } from "../typechain";
 import { AASigner, localUserOpSender, rpcUserOpSender, SendUserOp } from "../scripts/lib/AASigner";
 import { objdump } from "../scripts/lib/testutils";
-import { deployAll } from "../scripts/deploy";
+import { deployAll, deployArgentWallet } from "../scripts/deploy";
 
 describe("ArgentWallet", () => {
   let deployer: SignerWithAddress;
@@ -44,23 +44,19 @@ describe("ArgentWallet", () => {
     if (hre.network.name === "hardhat") {
       console.log(`deploying ArgentWallet`);
       ({ entryPointAddress, walletAddress, testCounterAddress } = await deployAll({
-        from: deployer, 
         signer: signer.address, 
         guardian: guardian.address,
       }));
 
-      // hre.run("deploy", { signerAddress: signer.address, guardianAddress: guardian.address });
-      // wallet = await ArgentWallet.deploy(...args);
-      // await wallet.deployed();
-
       sendUserOp = localUserOpSender(entryPointAddress, deployer);
     } else {
       entryPointAddress = "0xF63621e54F16eC6e4A732e44EaA7708935f259eF";
-      walletAddress = "0x15A83ceCCBC597F4E882596f7aEe28793Ca23Ea3";
       testCounterAddress = "0x4B52ceEDE2e695CAeDBC1Cc8E7f9d5Ef18F0EeF5";
-      // console.log(`verifying etherscan`);
-      // const args = [signer.address, guardian.address, entryPointAddress] as const;
-      // await hre.run("verify:verify", { address: wallet.address, constructorArguments: args });
+      walletAddress = await deployArgentWallet({
+        signer: signer.address, 
+        guardian: guardian.address,
+        entryPoint: entryPointAddress,
+      });
 
       sendUserOp = rpcUserOpSender(new ethers.providers.JsonRpcProvider(process.env.AA_URL));
     }
@@ -100,7 +96,7 @@ describe("ArgentWallet", () => {
   it("should increment the counter", async () => {
     const prebalance = await ethers.provider.getBalance(wallet.address)
     console.log("current counter=", await testCounter.counters(wallet.address), "balance=", prebalance, "stake=", currentStake)
-    const ret = await testCounter.count()
+    const ret = await testCounter.count({ gasLimit: 2e6 });
     console.log("waiting for mine, tmp.hash=", ret.hash)
     const receipt = await ret.wait()
     console.log("rcpt", receipt.transactionHash, `https://dashboard.tenderly.co/tx/goerli/${receipt.transactionHash}/gas-usage`)
@@ -115,7 +111,7 @@ describe("ArgentWallet", () => {
     const prebalance = await ethers.provider.getBalance(wallet.address)
     console.log("current signer=", await wallet.callStatic["signer"]());
     console.log("new signer=", newSigner.address);
-    const ret = await wallet.changeSigner(newSigner.address)
+    const ret = await wallet.changeSigner(newSigner.address, { gasLimit: 5e6 })
     console.log("waiting for mine, tmp.hash=", ret.hash)
     const receipt = await ret.wait()
     console.log("rcpt", receipt.transactionHash)
